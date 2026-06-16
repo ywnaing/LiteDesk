@@ -18,19 +18,35 @@ describe('sqliteWorkerMessages', () => {
     expect(createErrorResponse(3, new Error('bad query'))).toEqual({
       id: 3,
       ok: false,
-      error: 'bad query',
+      error: {
+        code: 'SQLITE_ERROR',
+        message: 'bad query',
+      },
     });
 
     expect(createErrorResponse(4, 'failed')).toEqual({
       id: 4,
       ok: false,
-      error: 'failed',
+      error: {
+        code: 'SQLITE_ERROR',
+        message: 'failed',
+      },
     });
   });
 
   it('checks whether unknown messages look like worker responses', () => {
     expect(isSQLiteWorkerResponse({ id: 1, ok: true, data: null })).toBe(true);
-    expect(isSQLiteWorkerResponse({ id: 1, ok: false, error: 'failed' })).toBe(true);
+    expect(
+      isSQLiteWorkerResponse({
+        id: 1,
+        ok: false,
+        error: {
+          code: 'SQLITE_ERROR',
+          message: 'failed',
+        },
+      }),
+    ).toBe(true);
+    expect(isSQLiteWorkerResponse({ id: 1, ok: false, error: 'failed' })).toBe(false);
     expect(isSQLiteWorkerResponse({ id: '1', ok: true })).toBe(false);
     expect(isSQLiteWorkerResponse(null)).toBe(false);
   });

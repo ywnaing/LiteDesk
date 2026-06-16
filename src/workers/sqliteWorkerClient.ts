@@ -1,3 +1,4 @@
+import { createAppError, deserializeAppError } from '../appErrors';
 import { buildTablePreviewQuery, FIRST_ROWS_LIMIT } from '../sqlite/queryHelpers';
 import type { DatabaseLoadResult, QueryResult, TableMetadata } from '../sqlite/types';
 import {
@@ -10,7 +11,7 @@ import {
 interface PendingRequest<T> {
   resolve: (value: T) => void;
   reject: (reason?: unknown) => void;
-  timeoutId: number;
+  timeoutId: ReturnType<typeof globalThis.setTimeout>;
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
@@ -19,6 +20,7 @@ export class SQLiteWorkerClient {
   private readonly worker: Worker;
   private readonly pendingRequests = new Map<number, PendingRequest<unknown>>();
   private nextRequestId = 1;
+  private isTerminated = false;
 
   constructor(worker = createSQLiteWorker()) {
     this.worker = worker;
@@ -31,29 +33,33 @@ export class SQLiteWorkerClient {
     fileName: string,
     fileBuffer: ArrayBuffer,
   ): Promise<DatabaseLoadResult> {
-    return this.request('loadDatabase', {
+    const request = this.createRequest('loadDatabase', {
       fileName,
       fileBuffer,
     });
+
+    return this.sendRequest(request, [fileBuffer]);
   }
 
   async listTables(): Promise<TableMetadata[]> {
-    return this.request('listTables');
+    return this.sendRequest(this.createRequest('listTables'));
   }
 
   async previewTable(tableName: string, limit = FIRST_ROWS_LIMIT): Promise<QueryResult> {
-    return this.request('previewTable', {
-      tableName,
-      limit,
-    });
+    return this.sendRequest(
+      this.createRequest('previewTable', {
+        tableName,
+        limit,
+      }),
+    );
   }
 
   async executeReadOnlyQuery(sql: string): Promise<QueryResult> {
-    return this.request('executeReadOnlyQuery', { sql });
+    return this.sendRequest(this.createRequest('executeReadOnlyQuery', { sql }));
   }
 
   async closeDatabase(): Promise<void> {
-    await this.request('closeDatabase');
+    await this.sendRequest(this.createRequest('closeDatabase'));
   }
 
   getTablePreviewQuery(tableName: string, limit = FIRST_ROWS_LIMIT): string {
@@ -61,45 +67,77 @@ export class SQLiteWorkerClient {
   }
 
   terminate(): void {
+    if (this.isTerminated) {
+      return;
+    }
+
+    this.isTerminated = true;
     this.worker.removeEventListener('message', this.handleMessage);
     this.worker.removeEventListener('error', this.handleWorkerError);
     this.worker.removeEventListener('messageerror', this.handleWorkerMessageError);
-    this.rejectAllPending(new Error('SQLite worker was terminated.'));
+    this.rejectAllPending(
+      createAppError('WORKER_TERMINATED', 'SQLite worker was terminated.'),
+    );
     this.worker.terminate();
   }
 
-  private request<TType extends SQLiteWorkerRequestType>(
+  private createRequest<TType extends SQLiteWorkerRequestType>(
     type: TType,
     payload?: Extract<SQLiteWorkerRequest, { type: TType }> extends {
       payload: infer TPayload;
     }
       ? TPayload
       : never,
-  ): Promise<SQLiteWorkerApi[TType]> {
+  ): Extract<SQLiteWorkerRequest, { type: TType }> {
     const id = this.nextRequestId;
     this.nextRequestId += 1;
 
-    const request = payload === undefined ? { id, type } : { id, type, payload };
+    return (payload === undefined ? { id, type } : { id, type, payload }) as Extract<
+      SQLiteWorkerRequest,
+      { type: TType }
+    >;
+  }
+
+  private sendRequest<TType extends SQLiteWorkerRequestType>(
+    request: Extract<SQLiteWorkerRequest, { type: TType }>,
+    transfer?: Transferable[],
+  ): Promise<SQLiteWorkerApi[TType]> {
+    if (this.isTerminated) {
+      return Promise.reject(
+        createAppError('WORKER_TERMINATED', 'SQLite worker was terminated.'),
+      );
+    }
 
     return new Promise((resolve, reject) => {
-      const timeoutId = window.setTimeout(() => {
-        this.pendingRequests.delete(id);
-        reject(new Error(`SQLite worker request timed out: ${type}`));
+      const timeoutId = globalThis.setTimeout(() => {
+        this.pendingRequests.delete(request.id);
+        reject(
+          createAppError(
+            'WORKER_TIMEOUT',
+            `SQLite worker request timed out: ${request.type}`,
+          ),
+        );
       }, DEFAULT_REQUEST_TIMEOUT_MS);
 
-      this.pendingRequests.set(id, {
+      this.pendingRequests.set(request.id, {
         resolve: resolve as (value: unknown) => void,
         reject,
         timeoutId,
       });
 
-      if (type === 'loadDatabase') {
-        const fileBuffer = (payload as { fileBuffer: ArrayBuffer }).fileBuffer;
-        this.worker.postMessage(request, [fileBuffer]);
-        return;
+      try {
+        this.worker.postMessage(request, transfer ?? []);
+      } catch (error) {
+        this.clearPendingRequest(request.id);
+        reject(
+          createAppError(
+            'WORKER_POST_ERROR',
+            error instanceof Error
+              ? error.message
+              : 'Unable to send request to SQLite worker.',
+          ),
+        );
       }
-
-      this.worker.postMessage(request);
     });
   }
 
@@ -114,28 +152,48 @@ export class SQLiteWorkerClient {
       return;
     }
 
-    this.pendingRequests.delete(event.data.id);
-    window.clearTimeout(pending.timeoutId);
+    this.clearPendingRequest(event.data.id);
 
     if (event.data.ok) {
       pending.resolve(event.data.data);
       return;
     }
 
-    pending.reject(new Error(event.data.error));
+    pending.reject(deserializeAppError(event.data.error));
   };
 
   private readonly handleWorkerError = (event: ErrorEvent): void => {
-    this.rejectAllPending(event.error ?? new Error(event.message));
+    this.rejectAllPending(
+      createAppError(
+        'WORKER_MESSAGE_ERROR',
+        event.error instanceof Error ? event.error.message : event.message,
+      ),
+    );
   };
 
   private readonly handleWorkerMessageError = (): void => {
-    this.rejectAllPending(new Error('SQLite worker message could not be decoded.'));
+    this.rejectAllPending(
+      createAppError(
+        'WORKER_MESSAGE_ERROR',
+        'SQLite worker message could not be decoded.',
+      ),
+    );
   };
+
+  private clearPendingRequest(id: number): void {
+    const pending = this.pendingRequests.get(id);
+
+    if (!pending) {
+      return;
+    }
+
+    globalThis.clearTimeout(pending.timeoutId);
+    this.pendingRequests.delete(id);
+  }
 
   private rejectAllPending(error: unknown): void {
     for (const pending of this.pendingRequests.values()) {
-      window.clearTimeout(pending.timeoutId);
+      globalThis.clearTimeout(pending.timeoutId);
       pending.reject(error);
     }
 

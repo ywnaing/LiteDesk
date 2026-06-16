@@ -7,6 +7,7 @@ export interface QueryResult {
   columns: string[];
   rows: unknown[][];
   rowCount: number;
+  isTruncated?: boolean;
 }
 
 export interface DatabaseLoadResult {

@@ -1,10 +1,11 @@
-import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js';
+import initSqlJs, { type Database, type SqlJsStatic, type Statement } from 'sql.js';
 import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
+import { createAppError } from '../appErrors';
 import {
   buildTablePreviewQuery,
   buildUserTablesQuery,
   isSelectQuery,
-  mapSqlJsResult,
+  MAX_QUERY_RESULT_ROWS,
 } from '../sqlite/queryHelpers';
 import type { QueryResult, TableMetadata } from '../sqlite/types';
 import {
@@ -26,7 +27,10 @@ function getSqliteModule(): Promise<SqlJsStatic> {
 
 function requireDatabase(): Database {
   if (!database) {
-    throw new Error('Open a SQLite database before running a query.');
+    throw createAppError(
+      'DATABASE_NOT_OPEN',
+      'Open a SQLite database before running a query.',
+    );
   }
 
   return database;
@@ -39,7 +43,7 @@ function closeCurrentDatabase(): void {
 
 function listTablesFromDatabase(openDatabase: Database): TableMetadata[] {
   const result = openDatabase.exec(buildUserTablesQuery());
-  const rows = mapSqlJsResult(result).rows;
+  const rows = result[0]?.values ?? [];
 
   return rows.map(([name]) => ({
     name: String(name),
@@ -49,22 +53,68 @@ function listTablesFromDatabase(openDatabase: Database): TableMetadata[] {
 
 function executeReadOnlyQuery(sql: string): QueryResult {
   if (!isSelectQuery(sql)) {
-    throw new Error('Only SELECT queries are supported in this phase.');
+    throw createAppError(
+      'INVALID_SQL',
+      'Only SELECT queries are supported in this phase.',
+    );
   }
 
-  return mapSqlJsResult(requireDatabase().exec(sql));
+  return executeQueryWithRowLimit(requireDatabase(), sql, MAX_QUERY_RESULT_ROWS);
+}
+
+function executeQueryWithRowLimit(
+  openDatabase: Database,
+  sql: string,
+  maxRows: number,
+): QueryResult {
+  let statement: Statement | null = null;
+
+  try {
+    statement = openDatabase.prepare(sql);
+    const columns = statement.getColumnNames();
+    const rows: unknown[][] = [];
+    let isTruncated = false;
+
+    while (statement.step()) {
+      if (rows.length >= maxRows) {
+        isTruncated = true;
+        break;
+      }
+
+      rows.push(statement.get());
+    }
+
+    return {
+      columns,
+      rows,
+      rowCount: rows.length,
+      isTruncated,
+    };
+  } finally {
+    statement?.free();
+  }
 }
 
 async function handleRequest(request: SQLiteWorkerRequest): Promise<unknown> {
   switch (request.type) {
     case 'loadDatabase': {
       const SQL = await getSqliteModule();
+      const nextDatabase = new SQL.Database(new Uint8Array(request.payload.fileBuffer));
+      let tables: TableMetadata[];
+
+      try {
+        tables = listTablesFromDatabase(nextDatabase);
+      } catch (error) {
+        nextDatabase.close();
+        throw error;
+      }
+
       closeCurrentDatabase();
-      database = new SQL.Database(new Uint8Array(request.payload.fileBuffer));
+      database = nextDatabase;
 
       return {
         fileName: request.payload.fileName,
-        tables: listTablesFromDatabase(database),
+        tables,
       };
     }
 

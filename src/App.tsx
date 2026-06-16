@@ -157,7 +157,12 @@ export default function App() {
 
           <div className="result-header">
             <h2>Results</h2>
-            {result && <span>{result.rowCount} row(s)</span>}
+            {result && (
+              <span>
+                {result.rowCount}
+                {result.isTruncated ? '+' : ''} row(s)
+              </span>
+            )}
           </div>
           <DataTable result={result} />
         </section>

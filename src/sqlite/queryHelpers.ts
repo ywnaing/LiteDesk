@@ -2,6 +2,15 @@ import type { QueryExecResult } from 'sql.js';
 import type { QueryResult } from './types';
 
 export const FIRST_ROWS_LIMIT = 100;
+export const MAX_QUERY_RESULT_ROWS = 1_000;
+
+export function clampRowLimit(limit: number): number {
+  if (!Number.isFinite(limit)) {
+    return FIRST_ROWS_LIMIT;
+  }
+
+  return Math.min(Math.max(Math.trunc(limit), 1), MAX_QUERY_RESULT_ROWS);
+}
 
 export function quoteIdentifier(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
@@ -11,7 +20,7 @@ export function buildTablePreviewQuery(
   tableName: string,
   limit = FIRST_ROWS_LIMIT,
 ): string {
-  return `SELECT * FROM ${quoteIdentifier(tableName)} LIMIT ${limit}`;
+  return `SELECT * FROM ${quoteIdentifier(tableName)} LIMIT ${clampRowLimit(limit)}`;
 }
 
 export function buildUserTablesQuery(): string {
