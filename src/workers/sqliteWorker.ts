@@ -2,7 +2,8 @@ import initSqlJs, { type Database, type SqlJsStatic, type Statement } from 'sql.
 import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { createAppError } from '../appErrors';
 import {
-  buildTablePreviewQuery,
+  buildTablePageQuery,
+  buildTableRowCountQuery,
   buildUserTablesQuery,
   isSelectQuery,
   MAX_QUERY_RESULT_ROWS,
@@ -60,6 +61,12 @@ function executeReadOnlyQuery(sql: string): QueryResult {
   }
 
   return executeQueryWithRowLimit(requireDatabase(), sql, MAX_QUERY_RESULT_ROWS);
+}
+
+function getTableRowCount(tableName: string): number {
+  const result = requireDatabase().exec(buildTableRowCountQuery(tableName));
+  const value = result[0]?.values[0]?.[0];
+  return typeof value === 'number' ? value : Number(value ?? 0);
 }
 
 function executeQueryWithRowLimit(
@@ -121,9 +128,16 @@ async function handleRequest(request: SQLiteWorkerRequest): Promise<unknown> {
     case 'listTables':
       return listTablesFromDatabase(requireDatabase());
 
-    case 'previewTable':
+    case 'getTableRowCount':
+      return getTableRowCount(request.payload.tableName);
+
+    case 'getTablePage':
       return executeReadOnlyQuery(
-        buildTablePreviewQuery(request.payload.tableName, request.payload.limit),
+        buildTablePageQuery(
+          request.payload.tableName,
+          request.payload.limit,
+          request.payload.offset,
+        ),
       );
 
     case 'executeReadOnlyQuery':

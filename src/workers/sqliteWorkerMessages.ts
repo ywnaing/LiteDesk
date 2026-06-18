@@ -16,10 +16,18 @@ export type SQLiteWorkerRequest =
     }
   | {
       id: number;
-      type: 'previewTable';
+      type: 'getTableRowCount';
+      payload: {
+        tableName: string;
+      };
+    }
+  | {
+      id: number;
+      type: 'getTablePage';
       payload: {
         tableName: string;
         limit: number;
+        offset: number;
       };
     }
   | {
@@ -49,7 +57,8 @@ export type SQLiteWorkerResponse<T = unknown> =
 export interface SQLiteWorkerApi {
   loadDatabase: DatabaseLoadResult;
   listTables: TableMetadata[];
-  previewTable: QueryResult;
+  getTableRowCount: number;
+  getTablePage: QueryResult;
   executeReadOnlyQuery: QueryResult;
   closeDatabase: null;
 }

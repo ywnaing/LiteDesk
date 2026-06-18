@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildTablePreviewQuery,
+  buildTablePageQuery,
+  buildTableRowCountQuery,
   buildUserTablesQuery,
   clampRowLimit,
   isSelectQuery,
@@ -15,12 +16,15 @@ describe('queryHelpers', () => {
     expect(quoteIdentifier('odd"name')).toBe('"odd""name"');
   });
 
-  it('builds a limited table preview query', () => {
-    expect(buildTablePreviewQuery('customers')).toBe(
-      'SELECT * FROM "customers" LIMIT 100',
+  it('builds safe row count and paginated table queries', () => {
+    expect(buildTableRowCountQuery('customers')).toBe(
+      'SELECT COUNT(*) AS row_count FROM "customers"',
     );
-    expect(buildTablePreviewQuery('customers', 25)).toBe(
-      'SELECT * FROM "customers" LIMIT 25',
+    expect(buildTablePageQuery('customers', 100, 200)).toBe(
+      'SELECT * FROM "customers" LIMIT 100 OFFSET 200',
+    );
+    expect(buildTablePageQuery('odd"name', 50, 0)).toBe(
+      'SELECT * FROM "odd""name" LIMIT 50 OFFSET 0',
     );
   });
 
@@ -29,8 +33,8 @@ describe('queryHelpers', () => {
     expect(clampRowLimit(25.8)).toBe(25);
     expect(clampRowLimit(Number.POSITIVE_INFINITY)).toBe(100);
     expect(clampRowLimit(MAX_QUERY_RESULT_ROWS + 1)).toBe(MAX_QUERY_RESULT_ROWS);
-    expect(buildTablePreviewQuery('customers', MAX_QUERY_RESULT_ROWS + 1)).toBe(
-      `SELECT * FROM "customers" LIMIT ${MAX_QUERY_RESULT_ROWS}`,
+    expect(buildTablePageQuery('customers', MAX_QUERY_RESULT_ROWS + 1, -20)).toBe(
+      'SELECT * FROM "customers" LIMIT 100 OFFSET 0',
     );
   });
 

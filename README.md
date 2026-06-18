@@ -7,7 +7,7 @@ Browser-based SQLite database viewer built with React, TypeScript, Vite, and sql
 - Open a local `.sqlite` or `.db` file with a file input.
 - Load the database in a Web Worker through sql.js WebAssembly.
 - List user tables from `sqlite_schema`.
-- Preview the first 100 rows from a selected table.
+- Browse selected tables with paginated pages of 50, 100, or 500 rows.
 - Run custom `SELECT` queries.
 - Display query result columns, rows, and SQL errors.
 
@@ -20,7 +20,7 @@ npm install
 npm run dev
 ```
 
-Open the printed Vite URL, choose a local SQLite database file, then select a table or run a custom `SELECT`.
+Open the printed Vite URL, choose a local SQLite database file, then select a table to page through rows or run a custom `SELECT`.
 
 ## Scripts
 

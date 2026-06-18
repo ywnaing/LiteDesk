@@ -1,4 +1,5 @@
 import type { QueryExecResult } from 'sql.js';
+import { clampOffset, clampPageSize, type PageSize } from './pagination';
 import type { QueryResult } from './types';
 
 export const FIRST_ROWS_LIMIT = 100;
@@ -16,11 +17,18 @@ export function quoteIdentifier(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
 }
 
-export function buildTablePreviewQuery(
+export function buildTableRowCountQuery(tableName: string): string {
+  return `SELECT COUNT(*) AS row_count FROM ${quoteIdentifier(tableName)}`;
+}
+
+export function buildTablePageQuery(
   tableName: string,
-  limit = FIRST_ROWS_LIMIT,
+  limit: number,
+  offset: number,
 ): string {
-  return `SELECT * FROM ${quoteIdentifier(tableName)} LIMIT ${clampRowLimit(limit)}`;
+  const pageSize: PageSize = clampPageSize(limit);
+  const safeOffset = clampOffset(offset, pageSize, Number.MAX_SAFE_INTEGER);
+  return `SELECT * FROM ${quoteIdentifier(tableName)} LIMIT ${pageSize} OFFSET ${safeOffset}`;
 }
 
 export function buildUserTablesQuery(): string {

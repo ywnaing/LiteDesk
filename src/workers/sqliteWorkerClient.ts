@@ -1,5 +1,5 @@
 import { createAppError, deserializeAppError } from '../appErrors';
-import { buildTablePreviewQuery, FIRST_ROWS_LIMIT } from '../sqlite/queryHelpers';
+import { buildTablePageQuery, FIRST_ROWS_LIMIT } from '../sqlite/queryHelpers';
 import type { DatabaseLoadResult, QueryResult, TableMetadata } from '../sqlite/types';
 import {
   isSQLiteWorkerResponse,
@@ -45,11 +45,20 @@ export class SQLiteWorkerClient {
     return this.sendRequest(this.createRequest('listTables'));
   }
 
-  async previewTable(tableName: string, limit = FIRST_ROWS_LIMIT): Promise<QueryResult> {
+  async getTableRowCount(tableName: string): Promise<number> {
+    return this.sendRequest(this.createRequest('getTableRowCount', { tableName }));
+  }
+
+  async getTablePage(
+    tableName: string,
+    limit = FIRST_ROWS_LIMIT,
+    offset = 0,
+  ): Promise<QueryResult> {
     return this.sendRequest(
-      this.createRequest('previewTable', {
+      this.createRequest('getTablePage', {
         tableName,
         limit,
+        offset,
       }),
     );
   }
@@ -62,8 +71,8 @@ export class SQLiteWorkerClient {
     await this.sendRequest(this.createRequest('closeDatabase'));
   }
 
-  getTablePreviewQuery(tableName: string, limit = FIRST_ROWS_LIMIT): string {
-    return buildTablePreviewQuery(tableName, limit);
+  getTablePageQuery(tableName: string, limit = FIRST_ROWS_LIMIT, offset = 0): string {
+    return buildTablePageQuery(tableName, limit, offset);
   }
 
   terminate(): void {
