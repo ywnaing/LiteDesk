@@ -23,6 +23,11 @@ export interface PaginationInfo extends PaginationState {
   lastOffset: number;
 }
 
+export interface PaginationDisplay {
+  rowRange: string;
+  pageSummary: string;
+}
+
 export function isPageSize(value: number): value is PageSize {
   return PAGE_SIZE_OPTIONS.includes(value as PageSize);
 }
@@ -83,5 +88,12 @@ export function getPaginationInfo(state: PaginationState): PaginationInfo {
     previousOffset,
     nextOffset,
     lastOffset,
+  };
+}
+
+export function getPaginationDisplay(info: PaginationInfo): PaginationDisplay {
+  return {
+    rowRange: `Rows ${info.startRow}-${info.endRow} of ${info.totalRows}`,
+    pageSummary: `Page ${info.currentPage} of ${info.totalPages}`,
   };
 }

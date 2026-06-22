@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DataTable } from './components/DataTable';
 import { TableList } from './components/TableList';
 import {
   DEFAULT_PAGE_SIZE,
   PAGE_SIZE_OPTIONS,
+  clampOffset,
+  clampPageSize,
+  getPaginationDisplay,
   getPaginationInfo,
   type DatabaseLoadResult,
   type PageSize,
@@ -29,6 +32,7 @@ export default function App() {
   const [query, setQuery] = useState('SELECT name, type FROM sqlite_schema LIMIT 100');
   const [result, setResult] = useState<QueryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const tableLoadRequestId = useRef(0);
 
   useEffect(() => {
     const client = new SQLiteWorkerClient();
@@ -57,6 +61,7 @@ export default function App() {
     setResult(null);
     setSelectedTable(null);
     setTableBrowse(null);
+    tableLoadRequestId.current += 1;
 
     try {
       if (!sqliteClient) {
@@ -91,30 +96,47 @@ export default function App() {
 
     setIsTableLoading(true);
     setError(null);
+    setSelectedTable(tableName);
+    const requestId = tableLoadRequestId.current + 1;
+    tableLoadRequestId.current = requestId;
 
     try {
-      const [totalRows, pageResult] = await Promise.all([
-        sqliteClient.getTableRowCount(tableName),
-        sqliteClient.getTablePage(tableName, pageSize, offset),
-      ]);
+      const safePageSize = clampPageSize(pageSize);
+      const totalRows = await sqliteClient.getTableRowCount(tableName);
+      const safeOffset = clampOffset(offset, safePageSize, totalRows);
+      const pageResult = await sqliteClient.getTablePage(
+        tableName,
+        safePageSize,
+        safeOffset,
+      );
 
-      setSelectedTable(tableName);
+      if (requestId !== tableLoadRequestId.current) {
+        return;
+      }
+
       setTableBrowse({
         tableName,
         totalRows,
-        pageSize,
-        offset,
+        pageSize: safePageSize,
+        offset: safeOffset,
       });
       setResult(pageResult);
       setError(null);
     } catch (queryError) {
+      if (requestId !== tableLoadRequestId.current) {
+        return;
+      }
+
       setResult(null);
       setTableBrowse(null);
+      setSelectedTable(null);
       setError(
         queryError instanceof Error ? queryError.message : 'Unable to load table page.',
       );
     } finally {
-      setIsTableLoading(false);
+      if (requestId === tableLoadRequestId.current) {
+        setIsTableLoading(false);
+      }
     }
   }
 
@@ -125,6 +147,8 @@ export default function App() {
       setError('Open a SQLite database before running a query.');
       return;
     }
+
+    tableLoadRequestId.current += 1;
 
     sqliteClient
       .executeReadOnlyQuery(query)
@@ -151,6 +175,7 @@ export default function App() {
   }
 
   const paginationInfo = tableBrowse ? getPaginationInfo(tableBrowse) : null;
+  const paginationDisplay = paginationInfo ? getPaginationDisplay(paginationInfo) : null;
 
   return (
     <main className="app-shell">
@@ -204,10 +229,7 @@ export default function App() {
           <div className="result-header">
             <h2>Results</h2>
             {paginationInfo ? (
-              <span>
-                Rows {paginationInfo.startRow}-{paginationInfo.endRow} of{' '}
-                {paginationInfo.totalRows}
-              </span>
+              <span>{paginationDisplay?.rowRange}</span>
             ) : result ? (
               <span>
                 {result.rowCount}
@@ -217,9 +239,7 @@ export default function App() {
           </div>
           {paginationInfo && tableBrowse && (
             <div className="pagination-bar" aria-label="Table pagination">
-              <div className="pagination-info">
-                Page {paginationInfo.currentPage || 0} of {paginationInfo.totalPages || 0}
-              </div>
+              <div className="pagination-info">{paginationDisplay?.pageSummary}</div>
               <label>
                 Rows
                 <select

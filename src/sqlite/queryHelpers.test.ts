@@ -14,6 +14,10 @@ describe('queryHelpers', () => {
   it('quotes SQLite identifiers safely', () => {
     expect(quoteIdentifier('users')).toBe('"users"');
     expect(quoteIdentifier('odd"name')).toBe('"odd""name"');
+    expect(quoteIdentifier('main.customers')).toBe('"main.customers"');
+    expect(quoteIdentifier('users; DROP TABLE users;')).toBe(
+      '"users; DROP TABLE users;"',
+    );
   });
 
   it('builds safe row count and paginated table queries', () => {

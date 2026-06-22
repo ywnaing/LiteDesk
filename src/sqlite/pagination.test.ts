@@ -4,6 +4,7 @@ import {
   clampOffset,
   clampPageSize,
   getLastPageOffset,
+  getPaginationDisplay,
   getPaginationInfo,
 } from './pagination';
 
@@ -43,8 +44,47 @@ describe('pagination', () => {
     });
   });
 
+  it('calculates fewer-than-page, exact-page, and partial-last-page display text', () => {
+    const fewerThanPage = getPaginationInfo({
+      pageSize: 100,
+      offset: 0,
+      totalRows: 25,
+    });
+    expect(getPaginationDisplay(fewerThanPage)).toEqual({
+      rowRange: 'Rows 1-25 of 25',
+      pageSummary: 'Page 1 of 1',
+    });
+    expect(fewerThanPage.canGoNext).toBe(false);
+    expect(fewerThanPage.canGoLast).toBe(false);
+
+    const exactPage = getPaginationInfo({
+      pageSize: 100,
+      offset: 0,
+      totalRows: 100,
+    });
+    expect(getPaginationDisplay(exactPage)).toEqual({
+      rowRange: 'Rows 1-100 of 100',
+      pageSummary: 'Page 1 of 1',
+    });
+    expect(exactPage.canGoNext).toBe(false);
+    expect(exactPage.canGoLast).toBe(false);
+
+    const partialLastPage = getPaginationInfo({
+      pageSize: 100,
+      offset: 200,
+      totalRows: 250,
+    });
+    expect(getPaginationDisplay(partialLastPage)).toEqual({
+      rowRange: 'Rows 201-250 of 250',
+      pageSummary: 'Page 3 of 3',
+    });
+    expect(partialLastPage.canGoNext).toBe(false);
+    expect(partialLastPage.canGoLast).toBe(false);
+  });
+
   it('handles empty result sets', () => {
-    expect(getPaginationInfo({ pageSize: 100, offset: 0, totalRows: 0 })).toMatchObject({
+    const emptyInfo = getPaginationInfo({ pageSize: 100, offset: 0, totalRows: 0 });
+    expect(emptyInfo).toMatchObject({
       currentPage: 0,
       totalPages: 0,
       startRow: 0,
@@ -53,6 +93,10 @@ describe('pagination', () => {
       canGoPrevious: false,
       canGoNext: false,
       canGoLast: false,
+    });
+    expect(getPaginationDisplay(emptyInfo)).toEqual({
+      rowRange: 'Rows 0-0 of 0',
+      pageSummary: 'Page 0 of 0',
     });
   });
 });
